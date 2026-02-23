@@ -88,28 +88,31 @@ jobs:
             CMD2_EXIT=0
           fi
           
-          # Simulate the logic from your emulator step
-          set +e
-          # This simulates running tests and capturing exit code
-          EXIT_CODE=$((CMD1_EXIT || CMD2_EXIT))
-          set -e
-          
-          echo "Combined exit code: $EXIT_CODE"
-          echo "exit_code=$EXIT_CODE" >> $GITHUB_OUTPUT
-          
-          # Exit with the combined code
-          exit $EXIT_CODE
+          # Special case: if both commands fail, simulate emulator failure (empty exit code)
+          if [ $CMD1_EXIT -eq 1 ] && [ $CMD2_EXIT -eq 1 ]; then
+            echo "⚠️ Simulating emulator failure - NOT setting exit_code output"
+            # Don't set exit_code - this simulates the emulator failing before tests run
+            exit 1
+          else
+            # Normal case: tests ran and produced an exit code
+            set +e
+            EXIT_CODE=$((CMD1_EXIT || CMD2_EXIT))
+            set -e
+            echo "Combined exit code: $EXIT_CODE"
+            echo "exit_code=$EXIT_CODE" >> $GITHUB_OUTPUT
+            exit $EXIT_CODE
+          fi
 
       - name: 📧 Step 4 - Email Notification with Logic
         if: |
           failure() && (
-            steps.step3.outcome == 'skipped' || 
-            (steps.step3.outcome == 'failure' && steps.step3.outputs.exit_code == '') 
+            steps.step3.outcome == 'skipped' ||  # Previous step failed, step3 was skipped
+            (steps.step3.outcome == 'failure' && steps.step3.outputs.exit_code == '')  # Step3 failed with empty exit code
           )
         run: |
           echo "📧 EMAIL TRIGGERED!"
           echo "Current context:"
-          echo "  - Workflow status: failure"
+          echo "  - Workflow status: failure (from condition)"
           echo "  - Step 3 outcome: ${{ steps.step3.outcome }}"
           echo "  - Step 3 exit_code output: '${{ steps.step3.outputs.exit_code }}'"
           
@@ -136,8 +139,25 @@ jobs:
           echo ""
           echo "Overall job status: ${{ job.status }}"
           echo ""
-          echo "Would email trigger? Let's check conditions:"
-          echo "  failure(): ${{ failure() }}"
-          echo "  steps.step3.outcome == 'skipped': ${{ steps.step3.outcome == 'skipped' }}"
-          echo "  steps.step3.outcome == 'failure': ${{ steps.step3.outcome == 'failure' }}"
-          echo "  steps.step3.outputs.exit_code == '': ${{ steps.step3.outputs.exit_code == '' }}"
+          echo "Would email trigger based on condition? Let's check manually:"
+          
+          # Manually check the same conditions as in step 4
+          if [ "${{ failure() }}" == "true" ]; then
+            echo "  ✓ failure() is true"
+            
+            if [ "${{ steps.step3.outcome }}" == "skipped" ]; then
+              echo "  ✓ Condition 1: steps.step3.outcome == 'skipped' is true"
+              echo "  → Email WOULD trigger (previous step failure)"
+            elif [ "${{ steps.step3.outcome }}" == "failure" ] && [ -z "${{ steps.step3.outputs.exit_code }}" ]; then
+              echo "  ✓ Condition 2: steps.step3.outcome == 'failure' AND exit_code is empty is true"
+              echo "  → Email WOULD trigger (emulator failure with empty exit code)"
+            else
+              echo "  ✗ Neither condition matched:"
+              echo "    - steps.step3.outcome == 'skipped': ${{ steps.step3.outcome == 'skipped' }}"
+              echo "    - steps.step3.outcome == 'failure' AND exit_code empty: ${{ steps.step3.outcome == 'failure' && steps.step3.outputs.exit_code == '' }}"
+              echo "  → Email would NOT trigger"
+            fi
+          else
+            echo "  ✗ failure() is false"
+            echo "  → Email would NOT trigger (no failure in workflow)"
+          fi
