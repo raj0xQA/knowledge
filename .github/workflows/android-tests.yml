@@ -1,0 +1,143 @@
+name: Test Failure Notification Logic
+
+on:
+  workflow_dispatch:
+    inputs:
+      step1_status:
+        description: 'Step 1 status (success/failure)'
+        required: true
+        default: 'success'
+        type: choice
+        options:
+          - success
+          - failure
+      step2_status:
+        description: 'Step 2 status (success/failure)'
+        required: true
+        default: 'success'
+        type: choice
+        options:
+          - success
+          - failure
+      step3_cmd1_status:
+        description: 'Step 3 Command 1 status (success/failure)'
+        required: true
+        default: 'failure'
+        type: choice
+        options:
+          - success
+          - failure
+      step3_cmd2_status:
+        description: 'Step 3 Command 2 status (success/failure)'
+        required: true
+        default: 'success'
+        type: choice
+        options:
+          - success
+          - failure
+
+jobs:
+  test-failure-logic:
+    runs-on: ubuntu-latest
+    steps:
+      - name: 📥 Checkout code
+        uses: actions/checkout@v3
+
+      - name: 🔧 Step 1 - Demo Step
+        id: step1
+        run: |
+          echo "Running Step 1..."
+          if [ "${{ github.event.inputs.step1_status }}" == "failure" ]; then
+            echo "❌ Step 1 failing as requested"
+            exit 1
+          else
+            echo "✅ Step 1 passing"
+            exit 0
+          fi
+
+      - name: 🔧 Step 2 - Demo Step (Can be controlled to fail)
+        id: step2
+        run: |
+          echo "Running Step 2..."
+          if [ "${{ github.event.inputs.step2_status }}" == "failure" ]; then
+            echo "❌ Step 2 failing as requested"
+            exit 1
+          else
+            echo "✅ Step 2 passing"
+            exit 0
+          fi
+
+      - name: 🔧 Step 3 - Multi-command Step (Simulates Emulator)
+        id: step3
+        run: |
+          echo "Running Command 1..."
+          if [ "${{ github.event.inputs.step3_cmd1_status }}" == "failure" ]; then
+            echo "❌ Command 1 failed"
+            CMD1_EXIT=1
+          else
+            echo "✅ Command 1 passed"
+            CMD1_EXIT=0
+          fi
+          
+          echo "Running Command 2..."
+          if [ "${{ github.event.inputs.step3_cmd2_status }}" == "failure" ]; then
+            echo "❌ Command 2 failed"
+            CMD2_EXIT=1
+          else
+            echo "✅ Command 2 passed"
+            CMD2_EXIT=0
+          fi
+          
+          # Simulate the logic from your emulator step
+          set +e
+          # This simulates running tests and capturing exit code
+          EXIT_CODE=$((CMD1_EXIT || CMD2_EXIT))
+          set -e
+          
+          echo "Combined exit code: $EXIT_CODE"
+          echo "exit_code=$EXIT_CODE" >> $GITHUB_OUTPUT
+          
+          # Exit with the combined code
+          exit $EXIT_CODE
+
+      - name: 📧 Step 4 - Email Notification with Logic
+        if: |
+          failure() && (
+            steps.step3.outcome == 'skipped' || 
+            (steps.step3.outcome == 'failure' && steps.step3.outputs.exit_code == '') 
+          )
+        run: |
+          echo "📧 EMAIL TRIGGERED!"
+          echo "Current context:"
+          echo "  - Workflow status: failure"
+          echo "  - Step 3 outcome: ${{ steps.step3.outcome }}"
+          echo "  - Step 3 exit_code output: '${{ steps.step3.outputs.exit_code }}'"
+          
+          if [ "${{ steps.step3.outcome }}" == "skipped" ]; then
+            echo "📧 Logic executed: Previous step (Step 1 or 2) failed, so Step 3 was skipped"
+            echo "📧 Would send email for previous step failure"
+          elif [ "${{ steps.step3.outcome }}" == "failure" ] && [ -z "${{ steps.step3.outputs.exit_code }}" ]; then
+            echo "📧 Logic executed: Step 3 failed with EMPTY exit code (simulating emulator failure)"
+            echo "📧 Would send email for emulator failure"
+          fi
+          
+          # Simulate sending email
+          # node ./utils/send-action-fail-mail.js
+
+      - name: 📊 Step 5 - Debug Information (Always runs)
+        if: always()
+        run: |
+          echo "🔍 DEBUG INFORMATION:"
+          echo "======================"
+          echo "Step 1 status: ${{ steps.step1.outcome }}"
+          echo "Step 2 status: ${{ steps.step2.outcome }}"
+          echo "Step 3 status: ${{ steps.step3.outcome }}"
+          echo "Step 3 exit_code output: '${{ steps.step3.outputs.exit_code }}'"
+          echo ""
+          echo "Overall job status: ${{ job.status }}"
+          echo ""
+          echo "Would email trigger? Let's check conditions:"
+          echo "  failure(): ${{ failure() }}"
+          echo "  steps.step3.outcome == 'skipped': ${{ steps.step3.outcome == 'skipped' }}"
+          echo "  steps.step3.outcome == 'failure': ${{ steps.step3.outcome == 'failure' }}"
+          echo "  steps.step3.outputs.exit_code == '': ${{ steps.step3.outputs.exit_code == '' }}"
